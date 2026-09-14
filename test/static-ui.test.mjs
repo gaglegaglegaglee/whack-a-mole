@@ -9,7 +9,8 @@ test('page declares mobile viewport, accessible live regions, and module app', a
   assert.match(html, /name="viewport"/);
   assert.match(html, /id="feedback"[^>]+aria-live="polite"/);
   assert.match(html, /id="countdown"[^>]+aria-live="assertive"/);
-  assert.match(html, /type="module" src="app\.js"/);
+  assert.match(html, /type="module" src="app\.js\?v=\d{8}-\d+"/);
+  assert.match(html, /styles\.css\?v=\d{8}-\d+/);
 });
 
 test('board uses a responsive dynamic-column layout with narrow-screen rules', async () => {
