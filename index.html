@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#ffd84d">
+  <title>두더지 팡팡</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="game-shell">
+    <header class="brand">
+      <span aria-hidden="true">🌱</span>
+      <h1>두더지 팡팡!</h1>
+      <p>숨어 있다 튀어나온 두더지를 빠르게 잡아 보세요.</p>
+      <button id="mute-button" class="mute-button" type="button" aria-pressed="false">🔊 소리 켜짐</button>
+    </header>
+
+    <p id="system-notice" class="system-notice" hidden role="status"></p>
+
+    <section id="start-screen" class="panel start-screen" aria-labelledby="how-to-play">
+      <h2 id="how-to-play">게임 방법</h2>
+      <ul>
+        <li>두더지는 한 번에 한 마리만 나타나요.</li>
+        <li>두더지는 +100점, 빈 구멍은 -50점이에요.</li>
+        <li>놓친 두더지는 감점되지 않아요.</li>
+        <li>10마리를 잡을 때마다 판이 커지고 빨라져요.</li>
+      </ul>
+      <button id="start-button" class="primary-button" type="button">게임 시작</button>
+    </section>
+
+    <section id="game-screen" class="panel game-screen" hidden aria-label="두더지잡기 게임">
+      <div class="round-status" aria-live="polite">
+        <span>점수 <strong id="score">0</strong></span>
+        <span>단계 <strong id="level">1</strong></span>
+        <span>시간 <strong id="time-left">60</strong>초</span>
+      </div>
+      <p id="feedback" class="feedback" aria-live="polite">두더지를 기다리세요!</p>
+      <div id="board" class="board" aria-label="3행 3열 두더지 구멍"></div>
+    </section>
+
+    <div id="countdown" class="countdown" hidden aria-live="assertive" aria-atomic="true"></div>
+    <section id="result-screen" class="result-screen" hidden role="dialog" aria-modal="true" aria-labelledby="result-title">
+      <div class="panel result-card">
+        <h2 id="result-title">게임 끝!</h2>
+        <dl>
+          <div><dt>점수</dt><dd id="result-score">0</dd></div>
+          <div><dt>도달 단계</dt><dd id="result-level">1</dd></div>
+          <div><dt>잡은 두더지</dt><dd id="result-hits">0</dd></div>
+          <div><dt>최고 점수</dt><dd id="best-score">0</dd></div>
+          <div><dt>최고 단계</dt><dd id="best-level">1</dd></div>
+        </dl>
+        <button id="restart-button" class="primary-button" type="button">다시 하기</button>
+      </div>
+    </section>
+    <section id="pause-screen" class="pause-screen" hidden role="dialog" aria-modal="true" aria-labelledby="pause-title">
+      <div class="panel pause-card">
+        <span aria-hidden="true">🙈</span>
+        <h2 id="pause-title">잠깐 멈췄어요</h2>
+        <p>준비되면 이어서 두더지를 잡아 보세요.</p>
+        <button id="resume-button" class="primary-button" type="button">계속하기</button>
+      </div>
+    </section>
+  </main>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
