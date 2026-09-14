@@ -26,10 +26,9 @@ const round = new MoleRound();
 let holes = [];
 let countdownRunning = false;
 let runId = 0;
-let moleTimer = null;
+const moleTimers = new Map();
 let nextTimer = null;
 let clockFrame = null;
-let moleDueAt = null;
 let nextDueAt = null;
 let nextKind = null;
 let nextProgression = null;
@@ -116,21 +115,21 @@ function delay(milliseconds) {
 }
 
 function clearGameTasks() {
-  window.clearTimeout(moleTimer);
+  moleTimers.forEach(({ timer }) => window.clearTimeout(timer));
+  moleTimers.clear();
   window.clearTimeout(nextTimer);
   window.cancelAnimationFrame(clockFrame);
-  moleTimer = null;
   nextTimer = null;
   clockFrame = null;
-  moleDueAt = null;
   nextDueAt = null;
   nextKind = null;
   nextProgression = null;
 }
 
-function paintMole(activeIndex = null) {
+function paintMoles() {
+  const activeHoles = round.activeHoles;
   holes.forEach((hole, index) => {
-    const active = index === activeIndex;
+    const active = activeHoles.has(index);
     hole.classList.toggle('has-mole', active);
     hole.setAttribute('aria-pressed', String(active));
   });
@@ -144,7 +143,7 @@ function updateStatus() {
 function finishGame() {
   if (!round.ended || !resultScreen.hidden) return;
   clearGameTasks();
-  paintMole();
+  paintMoles();
   holes.forEach((hole) => { hole.disabled = true; });
   timeLeft.textContent = '0';
   resultScore.textContent = String(round.score);
@@ -180,31 +179,35 @@ function scheduleNext(delayMs = NEXT_MOLE_MS) {
     nextTimer = null;
     nextDueAt = null;
     nextKind = null;
-    if (currentRun === runId) showMole();
+    if (currentRun === runId) fillMolesToCapacity();
   }, delayMs);
 }
 
 function scheduleMoleExpiry(appearance, delayMs) {
-  window.clearTimeout(moleTimer);
   const currentRun = runId;
-  moleDueAt = performance.now() + delayMs;
-  moleTimer = window.setTimeout(() => {
-    moleTimer = null;
-    moleDueAt = null;
+  const timer = window.setTimeout(() => {
+    moleTimers.delete(appearance.appearanceId);
     if (currentRun !== runId || !round.expire(appearance.appearanceId)) return;
-    paintMole();
+    paintMoles();
     feedback.className = 'feedback';
     feedback.textContent = '아깝다! 다음 두더지를 기다리세요.';
     scheduleNext();
   }, delayMs);
+  moleTimers.set(appearance.appearanceId, { timer, dueAt: performance.now() + delayMs, appearance });
 }
 
 function showMole() {
   const appearance = round.showNext();
-  if (!appearance) return;
-  paintMole(appearance.hole);
+  if (!appearance) return false;
+  paintMoles();
   const { visibleMs } = progressionForHits(round.hits);
   scheduleMoleExpiry(appearance, visibleMs);
+  return true;
+}
+
+function fillMolesToCapacity() {
+  const { maxMoles } = progressionForHits(round.hits);
+  while (round.activeMoles.size < maxMoles && showMole()) { /* Fill the stage maximum. */ }
 }
 
 function flash(hole, className) {
@@ -260,10 +263,10 @@ board.addEventListener('click', (event) => {
   if (result.type === 'ignored') return;
   playTone(result.type);
   if (result.type === 'hit') {
-    window.clearTimeout(moleTimer);
-    moleTimer = null;
-    moleDueAt = null;
-    paintMole();
+    const hitTimer = moleTimers.get(result.appearanceId);
+    if (hitTimer) window.clearTimeout(hitTimer.timer);
+    moleTimers.delete(result.appearanceId);
+    paintMoles();
     updateStatus();
     feedback.className = 'feedback success';
     feedback.textContent = '잡았다! +100 ★';
@@ -305,7 +308,7 @@ async function beginGame() {
   feedback.textContent = '두더지를 기다리세요!';
   countdownRunning = false;
   restartButton.disabled = false;
-  showMole();
+  fillMolesToCapacity();
   updateClock(currentRun);
 }
 
@@ -321,7 +324,10 @@ function pauseGame() {
     const now = performance.now();
     pauseSnapshot = {
       countdown: false,
-      moleRemaining: moleDueAt === null ? null : Math.max(0, moleDueAt - now),
+      moleRemaining: Array.from(moleTimers.values(), ({ dueAt, appearance }) => ({
+        appearance,
+        remaining: Math.max(0, dueAt - now)
+      })),
       nextRemaining: nextDueAt === null ? null : Math.max(0, nextDueAt - now),
       nextKind,
       progression: nextProgression
@@ -352,12 +358,17 @@ function resumeGame() {
   if (!round.resume(performance.now())) return;
   holes.forEach((hole) => { hole.disabled = false; });
   updateClock(runId);
-  if (snapshot.moleRemaining !== null && round.activeHole !== null) {
-    scheduleMoleExpiry({ appearanceId: round.appearanceId }, snapshot.moleRemaining);
-  } else if (snapshot.nextKind === 'level-change') {
+  if (snapshot.moleRemaining.length > 0 && round.activeMoles.size > 0) {
+    snapshot.moleRemaining.forEach(({ appearance, remaining }) => {
+      if (round.activeMoles.has(appearance.appearanceId)) scheduleMoleExpiry(appearance, remaining);
+    });
+  }
+  if (snapshot.nextKind === 'level-change') {
     scheduleLevelChange(snapshot.progression, snapshot.nextRemaining ?? 0);
-  } else {
-    scheduleNext(snapshot.nextRemaining ?? NEXT_MOLE_MS);
+  } else if (snapshot.nextRemaining !== null) {
+    scheduleNext(snapshot.nextRemaining);
+  } else if (round.activeMoles.size === 0) {
+    scheduleNext();
   }
 }
 
@@ -373,7 +384,7 @@ function scheduleLevelChange(progression, delayMs) {
     nextProgression = null;
     if (currentRun !== runId || !round.running) return;
     renderBoard(progression.size);
-    showMole();
+    fillMolesToCapacity();
   }, delayMs);
 }
 

@@ -96,10 +96,19 @@ test('pause dialog covers play and requires an explicit accessible resume action
 
 test('pause captures mole and next-action deadlines and countdown interruption restarts preparation', async () => {
   const source = await readFile(new URL('app.js', root), 'utf8');
-  assert.match(source, /moleRemaining:\s*moleDueAt === null \? null : Math\.max\(0, moleDueAt - now\)/);
+  assert.match(source, /moleRemaining:\s*Array\.from\(moleTimers\.values\(\)[\s\S]*remaining:\s*Math\.max\(0, dueAt - now\)/);
   assert.match(source, /nextRemaining:\s*nextDueAt === null \? null : Math\.max\(0, nextDueAt - now\)/);
   assert.match(source, /if \(snapshot\.countdown \|\| countdownInterrupted\)[\s\S]*beginGame\(\)/);
   assert.match(source, /if \(!resultScreen\.hidden \|\| pauseScreen\.hidden === false\) return/);
+});
+
+test('multiple mole UI uses per-appearance timers and paints all active holes', async () => {
+  const source = await readFile(new URL('app.js', root), 'utf8');
+  assert.match(source, /const moleTimers = new Map\(\)/);
+  assert.match(source, /moleTimers\.set\(appearance\.appearanceId/);
+  assert.match(source, /const activeHoles = round\.activeHoles/);
+  assert.match(source, /while \(round\.activeMoles\.size < maxMoles && showMole\(\)\)/);
+  assert.match(source, /moleTimers\.get\(result\.appearanceId\)/);
 });
 
 test('mobile controls have touch target sizing and reduced-motion outcomes remain distinct', async () => {

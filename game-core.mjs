@@ -1,8 +1,12 @@
-export function chooseNextHole(holeCount, previousHole, random = Math.random) {
+export function chooseNextHole(holeCount, previousHole, random = Math.random, excludedHoles = []) {
   if (!Number.isInteger(holeCount) || holeCount < 1) throw new RangeError('holeCount must be positive');
-  if (holeCount === 1) return 0;
-  const candidates = Array.from({ length: holeCount }, (_, index) => index)
-    .filter((index) => index !== previousHole);
+  const excluded = new Set(excludedHoles);
+  let candidates = Array.from({ length: holeCount }, (_, index) => index)
+    .filter((index) => index !== previousHole && !excluded.has(index));
+  if (candidates.length === 0) {
+    candidates = Array.from({ length: holeCount }, (_, index) => index).filter((index) => !excluded.has(index));
+  }
+  if (candidates.length === 0) return null;
   const value = Math.min(Math.max(Number(random()) || 0, 0), 0.999999999999);
   return candidates[Math.floor(value * candidates.length)];
 }
@@ -13,18 +17,23 @@ export function progressionForHits(hits) {
   const level = Math.min(3, Math.floor(Math.max(0, hits) / 10) + 1);
   const sizes = [3, 4, 5];
   const visibleDurations = [1100, 850, 650];
-  return { level, size: sizes[level - 1], holeCount: sizes[level - 1] ** 2, visibleMs: visibleDurations[level - 1] };
+  return {
+    level,
+    size: sizes[level - 1],
+    holeCount: sizes[level - 1] ** 2,
+    visibleMs: visibleDurations[level - 1],
+    maxMoles: level
+  };
 }
 
 export class MoleRound {
   constructor({ holeCount = 9, random = Math.random } = {}) {
     this.holeCount = holeCount;
     this.random = random;
-    this.activeHole = null;
+    this.activeMoles = new Map();
     this.previousHole = null;
     this.appearanceId = 0;
-    this.resolvedAppearanceId = null;
-    this.resolvedHole = null;
+    this.resolvedByHole = new Map();
     this.hits = 0;
     this.misses = 0;
     this.score = 0;
@@ -35,6 +44,18 @@ export class MoleRound {
     this.ended = false;
     this.paused = false;
     this.pausedRemainingMs = null;
+  }
+
+  get activeHoles() {
+    return new Set(Array.from(this.activeMoles.values(), (mole) => mole.hole));
+  }
+
+  get activeHole() {
+    return this.activeMoles.values().next().value?.hole ?? null;
+  }
+
+  set activeHole(value) {
+    if (value === null) this.clearActiveMoles();
   }
 
   start(now = 0) {
@@ -58,7 +79,7 @@ export class MoleRound {
     if (!this.running || this.remainingMs(now) > 0) return false;
     this.running = false;
     this.ended = true;
-    this.activeHole = null;
+    this.clearActiveMoles();
     return true;
   }
 
@@ -80,12 +101,15 @@ export class MoleRound {
     return true;
   }
 
+  clearActiveMoles() {
+    this.activeMoles.clear();
+  }
+
   reset() {
-    this.activeHole = null;
+    this.clearActiveMoles();
     this.previousHole = null;
     this.appearanceId += 1;
-    this.resolvedAppearanceId = null;
-    this.resolvedHole = null;
+    this.resolvedByHole.clear();
     this.hits = 0;
     this.misses = 0;
     this.score = 0;
@@ -100,19 +124,23 @@ export class MoleRound {
   }
 
   showNext() {
-    if (!this.running) return null;
-    this.activeHole = chooseNextHole(this.holeCount, this.previousHole, this.random);
-    this.previousHole = this.activeHole;
+    const { maxMoles } = progressionForHits(this.hits);
+    if (!this.running || this.activeMoles.size >= maxMoles) return null;
+    const hole = chooseNextHole(this.holeCount, this.previousHole, this.random, this.activeHoles);
+    if (hole === null) return null;
+    this.previousHole = hole;
     this.appearanceId += 1;
-    this.resolvedAppearanceId = null;
-    this.resolvedHole = null;
-    return { hole: this.activeHole, appearanceId: this.appearanceId };
+    const appearance = { hole, appearanceId: this.appearanceId };
+    this.activeMoles.set(appearance.appearanceId, appearance);
+    this.resolvedByHole.clear();
+    return appearance;
   }
 
   expire(appearanceId) {
-    if (!this.running || appearanceId !== this.appearanceId || this.resolvedAppearanceId === appearanceId) return false;
-    this.resolvedAppearanceId = appearanceId;
-    this.activeHole = null;
+    if (!this.running) return false;
+    const appearance = this.activeMoles.get(appearanceId);
+    if (!appearance) return false;
+    this.activeMoles.delete(appearanceId);
     return true;
   }
 
@@ -121,22 +149,19 @@ export class MoleRound {
     if (!this.running || !Number.isInteger(holeIndex) || holeIndex < 0 || holeIndex >= this.holeCount) {
       return { type: 'ignored' };
     }
-    if (this.activeHole === null
-      && this.resolvedAppearanceId === this.appearanceId
-      && this.resolvedHole === holeIndex) {
-      return { type: 'ignored' };
-    }
-    if (this.activeHole === holeIndex && this.resolvedAppearanceId !== this.appearanceId) {
-      this.resolvedAppearanceId = this.appearanceId;
-      this.resolvedHole = holeIndex;
-      this.activeHole = null;
+    const appearance = Array.from(this.activeMoles.values()).find((mole) => mole.hole === holeIndex);
+    if (!appearance && this.resolvedByHole.has(holeIndex)) return { type: 'ignored' };
+    if (appearance) {
+      this.activeMoles.delete(appearance.appearanceId);
+      this.resolvedByHole.set(holeIndex, appearance.appearanceId);
       this.hits += 1;
       this.score += 100;
       const progression = progressionForHits(this.hits);
       const levelChanged = progression.level !== this.level;
       this.level = progression.level;
       this.holeCount = progression.holeCount;
-      return { type: 'hit', appearanceId: this.appearanceId, levelChanged, progression };
+      if (levelChanged) this.clearActiveMoles();
+      return { type: 'hit', appearanceId: appearance.appearanceId, levelChanged, progression };
     }
     this.misses += 1;
     this.score = Math.max(0, this.score - 50);
