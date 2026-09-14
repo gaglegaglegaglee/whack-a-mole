@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chooseNextHole, GAME_DURATION_MS, MoleRound, progressionForHits } from '../game-core.mjs';
+import { chooseNextHole, GAME_DURATION_MS, MoleRound, progressionForHits, separatedExpiry, staggerDelay } from '../game-core.mjs';
 
 test('injected random values select deterministic holes without immediate repetition', () => {
   assert.equal(chooseNextHole(9, null, () => 0), 0);
@@ -47,6 +47,7 @@ test('duplicate guard resets for a new appearance generation', () => {
   round.start();
   const first = round.showNext();
   round.press(first.hole);
+  round.completeHit(first.appearanceId);
   const second = round.showNext();
   assert.equal(round.press(first.hole).type, 'miss');
   assert.equal(round.press(second.hole).type, 'hit');
@@ -79,6 +80,7 @@ test('stale expiry cannot remove a newer mole', () => {
   round.start();
   const oldMole = round.showNext();
   round.press(oldMole.hole);
+  round.completeHit(oldMole.appearanceId);
   const currentMole = round.showNext();
   assert.equal(round.expire(oldMole.appearanceId), false);
   assert.equal(round.activeHole, currentMole.hole);
@@ -98,6 +100,7 @@ test('hits add 100, misses subtract 50, and score never drops below zero', () =>
   const mole = round.showNext();
   round.press(mole.hole);
   assert.equal(round.score, 100);
+  round.completeHit(mole.appearanceId);
   round.showNext();
   round.press(8);
   assert.equal(round.score, 50);
@@ -112,28 +115,90 @@ test('natural expiry leaves score unchanged', () => {
 });
 
 test('progression boundaries produce 3x3, 4x4, then capped 5x5 with faster moles', () => {
-  assert.deepEqual(progressionForHits(9), { level: 1, size: 3, holeCount: 9, visibleMs: 1100, maxMoles: 1 });
-  assert.deepEqual(progressionForHits(10), { level: 2, size: 4, holeCount: 16, visibleMs: 850, maxMoles: 2 });
-  assert.deepEqual(progressionForHits(19), { level: 2, size: 4, holeCount: 16, visibleMs: 850, maxMoles: 2 });
-  assert.deepEqual(progressionForHits(20), { level: 3, size: 5, holeCount: 25, visibleMs: 650, maxMoles: 3 });
+  assert.deepEqual(progressionForHits(9), { level: 1, size: 3, holeCount: 9, visibleMs: 1100, maxMoles: 1, spawnIntervalMs: 520 });
+  assert.deepEqual(progressionForHits(10), { level: 2, size: 4, holeCount: 16, visibleMs: 950, maxMoles: 1, spawnIntervalMs: 460 });
+  assert.deepEqual(progressionForHits(19), { level: 2, size: 4, holeCount: 16, visibleMs: 950, maxMoles: 1, spawnIntervalMs: 460 });
+  assert.deepEqual(progressionForHits(20), { level: 3, size: 4, holeCount: 16, visibleMs: 800, maxMoles: 2, spawnIntervalMs: 400 });
   assert.equal(progressionForHits(30).holeCount, 25);
+  assert.deepEqual(
+    [0, 10, 20, 30, 40].map((hits) => {
+      const { level, size, maxMoles } = progressionForHits(hits);
+      return [level, size, maxMoles];
+    }),
+    [[1, 3, 1], [2, 4, 1], [3, 4, 2], [4, 5, 2], [5, 5, 3]]
+  );
+  assert.equal(progressionForHits(99).level, 5);
   assert.ok(progressionForHits(1).visibleMs > progressionForHits(10).visibleMs);
   assert.ok(progressionForHits(10).visibleMs > progressionForHits(20).visibleMs);
 });
 
-test('the tenth and twentieth hits atomically report level changes', () => {
+test('stagger delay has injectable jitter and never synchronizes all appearances', () => {
+  const progression = progressionForHits(20);
+  assert.equal(staggerDelay(progression, () => 0), 300);
+  assert.equal(staggerDelay(progression, () => 0.5), 400);
+  assert.equal(staggerDelay(progression, () => 0.999), 500);
+});
+
+test('expiry separation resolves the regular and giant collision example deterministically', () => {
+  const result = separatedExpiry({ spawnedAt: 350, visibleMs: 450, existingDeadlines: [800] });
+  assert.deepEqual(result, { deadline: 680, visibleMs: 330 });
+  assert.ok(Math.abs(result.deadline - 800) >= 120);
+});
+
+test('expiry separation checks every existing deadline and bounds giant extension', () => {
+  const result = separatedExpiry({ spawnedAt: 350, visibleMs: 450, existingDeadlines: [800, 680] });
+  assert.deepEqual(result, { deadline: 920, visibleMs: 570 });
+  assert.ok([800, 680].every((deadline) => Math.abs(result.deadline - deadline) >= 120));
+  assert.ok(result.visibleMs <= 600);
+  assert.deepEqual(
+    separatedExpiry({ spawnedAt: 100, visibleMs: 450, existingDeadlines: [1000] }),
+    { deadline: 550, visibleMs: 450 }
+  );
+});
+
+test('giant mole uses injected ten-percent roll, 450ms duration, and 300 points', () => {
+  const giantRound = new MoleRound({ random: () => 0.5, typeRandom: () => 0.099 });
+  giantRound.start();
+  const giant = giantRound.showNext();
+  assert.equal(giant.type, 'giant');
+  assert.equal(giant.visibleMs, 450);
+  const result = giantRound.press(giant.hole);
+  assert.deepEqual({ moleType: result.moleType, points: result.points }, { moleType: 'giant', points: 300 });
+  assert.equal(giantRound.score, 300);
+
+  const normalRound = new MoleRound({ random: () => 0.5, typeRandom: () => 0.1 });
+  normalRound.start();
+  const normal = normalRound.showNext();
+  assert.equal(normal.type, 'normal');
+  assert.equal(normal.visibleMs, 1100);
+});
+
+test('hit mole stays non-interactive until its visual lifecycle completes', () => {
+  const round = new MoleRound({ random: () => 0 });
+  round.start();
+  const mole = round.showNext();
+  const result = round.press(mole.hole);
+  assert.equal(round.activeMoles.get(result.appearanceId).status, 'hit');
+  assert.equal(round.press(mole.hole).type, 'ignored');
+  assert.equal(round.expire(mole.appearanceId), false);
+  assert.equal(round.completeHit(mole.appearanceId), true);
+  assert.equal(round.activeMoles.size, 0);
+});
+
+test('every ten hits atomically advances through five capped levels', () => {
   const round = new MoleRound({ random: () => 0 });
   round.start();
   let result;
-  for (let hit = 1; hit <= 20; hit += 1) {
+  for (let hit = 1; hit <= 50; hit += 1) {
     const mole = round.showNext();
     result = round.press(mole.hole);
-    assert.equal(result.levelChanged, hit === 10 || hit === 20);
+    assert.equal(result.levelChanged, [10, 20, 30, 40].includes(hit));
     if (hit === 10) assert.equal(round.holeCount, 16);
+    round.completeHit(mole.appearanceId);
   }
-  assert.equal(round.level, 3);
+  assert.equal(round.level, 5);
   assert.equal(round.holeCount, 25);
-  assert.equal(round.score, 2000);
+  assert.equal(round.score, 5000);
 });
 
 test('remaining time uses elapsed timestamps and ends exactly once at sixty seconds', () => {
@@ -209,15 +274,15 @@ test('each stage enforces its simultaneous mole maximum without duplicate holes'
   assert.ok(round.showNext());
   assert.equal(round.showNext(), null);
   round.clearActiveMoles();
-  round.hits = 10;
-  round.level = 2;
+  round.hits = 20;
+  round.level = 3;
   round.holeCount = 16;
   const levelTwo = [round.showNext(), round.showNext()];
   assert.equal(new Set(levelTwo.map(({ hole }) => hole)).size, 2);
   assert.equal(round.showNext(), null);
   round.clearActiveMoles();
-  round.hits = 20;
-  round.level = 3;
+  round.hits = 40;
+  round.level = 5;
   round.holeCount = 25;
   const levelThree = [round.showNext(), round.showNext(), round.showNext()];
   assert.equal(new Set(levelThree.map(({ hole }) => hole)).size, 3);
@@ -227,27 +292,28 @@ test('each stage enforces its simultaneous mole maximum without duplicate holes'
 test('simultaneous moles expire and score independently', () => {
   const round = new MoleRound({ random: () => 0 });
   round.start();
-  round.hits = 10;
-  round.level = 2;
+  round.hits = 20;
+  round.level = 3;
   round.holeCount = 16;
   const first = round.showNext();
   const second = round.showNext();
   assert.equal(round.expire(first.appearanceId), true);
   assert.equal(round.activeHoles.has(second.hole), true);
   assert.equal(round.press(second.hole).type, 'hit');
-  assert.equal(round.hits, 11);
+  assert.equal(round.hits, 21);
   assert.equal(round.score, 100);
 });
 
 test('stale timer for one mole cannot remove another or its replacement', () => {
   const round = new MoleRound({ random: () => 0 });
   round.start();
-  round.hits = 10;
-  round.level = 2;
+  round.hits = 20;
+  round.level = 3;
   round.holeCount = 16;
   const first = round.showNext();
   const second = round.showNext();
   round.press(first.hole);
+  round.completeHit(first.appearanceId);
   const replacement = round.showNext();
   assert.equal(round.expire(first.appearanceId), false);
   assert.equal(round.activeHoles.has(second.hole), true);
@@ -257,13 +323,14 @@ test('stale timer for one mole cannot remove another or its replacement', () => 
 test('level transition invalidates every mole from the previous board', () => {
   const round = new MoleRound({ random: () => 0 });
   round.start();
-  round.hits = 19;
-  round.level = 2;
+  round.hits = 29;
+  round.level = 3;
   round.holeCount = 16;
   const transitionMole = round.showNext();
   const otherMole = round.showNext();
   const result = round.press(transitionMole.hole);
   assert.equal(result.levelChanged, true);
+  round.clearActiveMoles();
   assert.equal(round.activeMoles.size, 0);
   assert.equal(round.expire(otherMole.appearanceId), false);
 });
@@ -271,8 +338,8 @@ test('level transition invalidates every mole from the previous board', () => {
 test('pause keeps all simultaneous appearances intact for independent resume timers', () => {
   const round = new MoleRound({ random: () => 0 });
   round.start(0);
-  round.hits = 10;
-  round.level = 2;
+  round.hits = 20;
+  round.level = 3;
   round.holeCount = 16;
   const appearances = [round.showNext(), round.showNext()];
   round.pause(500);

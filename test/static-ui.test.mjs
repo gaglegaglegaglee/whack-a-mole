@@ -107,9 +107,29 @@ test('multiple mole UI uses per-appearance timers and paints all active holes', 
   const source = await readFile(new URL('app.js', root), 'utf8');
   assert.match(source, /const moleTimers = new Map\(\)/);
   assert.match(source, /moleTimers\.set\(appearance\.appearanceId/);
-  assert.match(source, /const activeHoles = round\.activeHoles/);
-  assert.match(source, /while \(round\.activeMoles\.size < maxMoles && showMole\(\)\)/);
+  assert.match(source, /const moleByHole = round\.moleByHole/);
+  assert.doesNotMatch(source, /while \(round\.activeMoles\.size < maxMoles/);
+  assert.match(source, /staggerDelay\(progression, Math\.random\)/);
   assert.match(source, /moleTimers\.get\(result\.appearanceId\)/);
+});
+
+test('giant and hit lifecycle receive distinct mole classes without replacing tunnel markup', async () => {
+  const [source, css] = await Promise.all([
+    readFile(new URL('app.js', root), 'utf8'),
+    readFile(new URL('styles.css', root), 'utf8')
+  ]);
+  assert.match(source, /classList\.toggle\('giant-mole'/);
+  assert.match(source, /classList\.toggle\('mole-hit'/);
+  assert.match(source, /scheduleHitRemoval\(round\.activeMoles\.get\(result\.appearanceId\)\)/);
+  assert.match(css, /\.hole\.giant-mole \.mole/);
+  assert.match(css, /\.hole\.mole-hit \.mole/);
+});
+
+test('new expiry deadlines are separated from every active expiry timer', async () => {
+  const source = await readFile(new URL('app.js', root), 'utf8');
+  assert.match(source, /filter\(\(\{ kind \}\) => kind === 'expiry'\)/);
+  assert.match(source, /separatedExpiry\(\{[\s\S]*existingDeadlines/);
+  assert.match(source, /scheduleMoleExpiry\(appearance, separated\.visibleMs, separated\.deadline\)/);
 });
 
 test('mobile controls have touch target sizing and reduced-motion outcomes remain distinct', async () => {

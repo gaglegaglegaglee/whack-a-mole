@@ -1,4 +1,4 @@
-import { MoleRound, progressionForHits } from './game-core.mjs';
+import { MoleRound, progressionForHits, separatedExpiry, staggerDelay } from './game-core.mjs';
 import { loadPreferences, savePreferences, updateBest } from './device-preferences.mjs';
 
 const startScreen = document.querySelector('#start-screen');
@@ -22,7 +22,7 @@ const systemNotice = document.querySelector('#system-notice');
 const pauseScreen = document.querySelector('#pause-screen');
 const resumeButton = document.querySelector('#resume-button');
 
-const round = new MoleRound();
+const round = new MoleRound({ typeRandom: Math.random });
 let holes = [];
 let countdownRunning = false;
 let runId = 0;
@@ -34,7 +34,6 @@ let nextKind = null;
 let nextProgression = null;
 let pauseSnapshot = null;
 let countdownInterrupted = false;
-const NEXT_MOLE_MS = 180;
 let audioContext = null;
 let storage = null;
 let storageNoticeShown = false;
@@ -102,7 +101,8 @@ function renderBoard(size) {
     hole.type = 'button';
     hole.className = 'hole';
     hole.dataset.index = String(index);
-    hole.setAttribute('aria-label', `${Math.floor(index / size) + 1}행 ${index % size + 1}열 구멍`);
+    hole.dataset.label = `${Math.floor(index / size) + 1}행 ${index % size + 1}열 구멍`;
+    hole.setAttribute('aria-label', hole.dataset.label);
     hole.disabled = !round.running;
     hole.innerHTML = '<span class="tunnel" aria-hidden="true"><span class="mole"></span></span>';
     board.append(hole);
@@ -127,11 +127,16 @@ function clearGameTasks() {
 }
 
 function paintMoles() {
-  const activeHoles = round.activeHoles;
+  const moleByHole = round.moleByHole;
   holes.forEach((hole, index) => {
-    const active = activeHoles.has(index);
+    const mole = moleByHole.get(index);
+    const active = Boolean(mole);
     hole.classList.toggle('has-mole', active);
+    hole.classList.toggle('giant-mole', mole?.type === 'giant');
+    hole.classList.toggle('mole-hit', mole?.status === 'hit');
     hole.setAttribute('aria-pressed', String(active));
+    if (mole?.type === 'giant') hole.setAttribute('aria-label', `${hole.dataset.label}, 대왕 두더지`);
+    else hole.setAttribute('aria-label', hole.dataset.label);
   });
 }
 
@@ -169,21 +174,23 @@ function updateClock(currentRun) {
   clockFrame = window.requestAnimationFrame(() => updateClock(currentRun));
 }
 
-function scheduleNext(delayMs = NEXT_MOLE_MS) {
-  window.clearTimeout(nextTimer);
+function scheduleNext(delayMs = null) {
+  const progression = progressionForHits(round.hits);
+  if (nextTimer !== null || round.activeMoles.size >= progression.maxMoles || !round.running) return;
+  const waitMs = delayMs ?? staggerDelay(progression, Math.random);
   const currentRun = runId;
-  nextDueAt = performance.now() + delayMs;
+  nextDueAt = performance.now() + waitMs;
   nextKind = 'show-next';
   nextProgression = null;
   nextTimer = window.setTimeout(() => {
     nextTimer = null;
     nextDueAt = null;
     nextKind = null;
-    if (currentRun === runId) fillMolesToCapacity();
-  }, delayMs);
+    if (currentRun === runId && showMole()) scheduleNext();
+  }, waitMs);
 }
 
-function scheduleMoleExpiry(appearance, delayMs) {
+function scheduleMoleExpiry(appearance, delayMs, deadline = performance.now() + delayMs) {
   const currentRun = runId;
   const timer = window.setTimeout(() => {
     moleTimers.delete(appearance.appearanceId);
@@ -193,21 +200,41 @@ function scheduleMoleExpiry(appearance, delayMs) {
     feedback.textContent = '아깝다! 다음 두더지를 기다리세요.';
     scheduleNext();
   }, delayMs);
-  moleTimers.set(appearance.appearanceId, { timer, dueAt: performance.now() + delayMs, appearance });
+  moleTimers.set(appearance.appearanceId, { timer, dueAt: deadline, appearance, kind: 'expiry' });
+}
+
+function scheduleHitRemoval(appearance, delayMs = 250) {
+  const currentRun = runId;
+  const timer = window.setTimeout(() => {
+    moleTimers.delete(appearance.appearanceId);
+    if (currentRun !== runId || !round.completeHit(appearance.appearanceId)) return;
+    paintMoles();
+    scheduleNext();
+  }, delayMs);
+  moleTimers.set(appearance.appearanceId, { timer, dueAt: performance.now() + delayMs, appearance, kind: 'hit-removal' });
 }
 
 function showMole() {
   const appearance = round.showNext();
   if (!appearance) return false;
   paintMoles();
-  const { visibleMs } = progressionForHits(round.hits);
-  scheduleMoleExpiry(appearance, visibleMs);
+  const spawnedAt = performance.now();
+  const existingDeadlines = Array.from(moleTimers.values())
+    .filter(({ kind }) => kind === 'expiry')
+    .map(({ dueAt }) => dueAt);
+  const separated = separatedExpiry({
+    spawnedAt,
+    visibleMs: appearance.visibleMs,
+    existingDeadlines,
+    minVisibleMs: appearance.type === 'giant' ? 300 : 350
+  });
+  scheduleMoleExpiry(appearance, separated.visibleMs, separated.deadline);
   return true;
 }
 
-function fillMolesToCapacity() {
-  const { maxMoles } = progressionForHits(round.hits);
-  while (round.activeMoles.size < maxMoles && showMole()) { /* Fill the stage maximum. */ }
+function startStaggeredMoles() {
+  if (round.activeMoles.size === 0) showMole();
+  scheduleNext();
 }
 
 function flash(hole, className) {
@@ -269,10 +296,10 @@ board.addEventListener('click', (event) => {
     paintMoles();
     updateStatus();
     feedback.className = 'feedback success';
-    feedback.textContent = '잡았다! +100 ★';
+    feedback.textContent = result.moleType === 'giant' ? '대왕 두더지! +300 ★' : '잡았다! +100 ★';
     flash(hole, 'hit');
     if (result.levelChanged) changeLevel(result.progression);
-    else scheduleNext();
+    else scheduleHitRemoval(round.activeMoles.get(result.appearanceId));
     return;
   }
   updateStatus();
@@ -308,7 +335,7 @@ async function beginGame() {
   feedback.textContent = '두더지를 기다리세요!';
   countdownRunning = false;
   restartButton.disabled = false;
-  fillMolesToCapacity();
+  startStaggeredMoles();
   updateClock(currentRun);
 }
 
@@ -324,8 +351,9 @@ function pauseGame() {
     const now = performance.now();
     pauseSnapshot = {
       countdown: false,
-      moleRemaining: Array.from(moleTimers.values(), ({ dueAt, appearance }) => ({
+      moleRemaining: Array.from(moleTimers.values(), ({ dueAt, appearance, kind }) => ({
         appearance,
+        kind,
         remaining: Math.max(0, dueAt - now)
       })),
       nextRemaining: nextDueAt === null ? null : Math.max(0, nextDueAt - now),
@@ -359,8 +387,10 @@ function resumeGame() {
   holes.forEach((hole) => { hole.disabled = false; });
   updateClock(runId);
   if (snapshot.moleRemaining.length > 0 && round.activeMoles.size > 0) {
-    snapshot.moleRemaining.forEach(({ appearance, remaining }) => {
-      if (round.activeMoles.has(appearance.appearanceId)) scheduleMoleExpiry(appearance, remaining);
+    snapshot.moleRemaining.forEach(({ appearance, remaining, kind }) => {
+      if (!round.activeMoles.has(appearance.appearanceId)) return;
+      if (kind === 'hit-removal') scheduleHitRemoval(appearance, remaining);
+      else scheduleMoleExpiry(appearance, remaining);
     });
   }
   if (snapshot.nextKind === 'level-change') {
@@ -384,7 +414,7 @@ function scheduleLevelChange(progression, delayMs) {
     nextProgression = null;
     if (currentRun !== runId || !round.running) return;
     renderBoard(progression.size);
-    fillMolesToCapacity();
+    startStaggeredMoles();
   }, delayMs);
 }
 

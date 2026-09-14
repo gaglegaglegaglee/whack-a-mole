@@ -14,22 +14,55 @@ export function chooseNextHole(holeCount, previousHole, random = Math.random, ex
 export const GAME_DURATION_MS = 60_000;
 
 export function progressionForHits(hits) {
-  const level = Math.min(3, Math.floor(Math.max(0, hits) / 10) + 1);
-  const sizes = [3, 4, 5];
-  const visibleDurations = [1100, 850, 650];
+  const level = Math.min(5, Math.floor(Math.max(0, hits) / 10) + 1);
+  const sizes = [3, 4, 4, 5, 5];
+  const visibleDurations = [1100, 950, 800, 700, 600];
+  const maxMoles = [1, 1, 2, 2, 3];
+  const spawnIntervals = [520, 460, 400, 350, 300];
   return {
     level,
     size: sizes[level - 1],
     holeCount: sizes[level - 1] ** 2,
     visibleMs: visibleDurations[level - 1],
-    maxMoles: level
+    maxMoles: maxMoles[level - 1],
+    spawnIntervalMs: spawnIntervals[level - 1]
   };
 }
 
+export function staggerDelay(progression, random = Math.random) {
+  const value = Math.min(Math.max(Number(random()) || 0, 0), 0.999999999999);
+  return Math.round(progression.spawnIntervalMs * (0.75 + value * 0.5));
+}
+
+export function separatedExpiry({
+  spawnedAt,
+  visibleMs,
+  existingDeadlines,
+  minGapMs = 120,
+  minVisibleMs = 300,
+  maxExtensionMs = 150
+}) {
+  const desired = spawnedAt + visibleMs;
+  const deadlines = Array.from(existingDeadlines).filter(Number.isFinite);
+  const isSafe = (candidate) => deadlines.every((deadline) => Math.abs(candidate - deadline) >= minGapMs);
+  if (isSafe(desired)) return { deadline: desired, visibleMs };
+
+  for (let offset = minGapMs; offset <= visibleMs - minVisibleMs; offset += minGapMs) {
+    const candidate = desired - offset;
+    if (isSafe(candidate)) return { deadline: candidate, visibleMs: candidate - spawnedAt };
+  }
+  for (let offset = minGapMs; offset <= maxExtensionMs; offset += minGapMs) {
+    const candidate = desired + offset;
+    if (isSafe(candidate)) return { deadline: candidate, visibleMs: candidate - spawnedAt };
+  }
+  return { deadline: desired, visibleMs };
+}
+
 export class MoleRound {
-  constructor({ holeCount = 9, random = Math.random } = {}) {
+  constructor({ holeCount = 9, random = Math.random, typeRandom = () => 1 } = {}) {
     this.holeCount = holeCount;
     this.random = random;
+    this.typeRandom = typeRandom;
     this.activeMoles = new Map();
     this.previousHole = null;
     this.appearanceId = 0;
@@ -48,6 +81,10 @@ export class MoleRound {
 
   get activeHoles() {
     return new Set(Array.from(this.activeMoles.values(), (mole) => mole.hole));
+  }
+
+  get moleByHole() {
+    return new Map(Array.from(this.activeMoles.values(), (mole) => [mole.hole, mole]));
   }
 
   get activeHole() {
@@ -130,7 +167,14 @@ export class MoleRound {
     if (hole === null) return null;
     this.previousHole = hole;
     this.appearanceId += 1;
-    const appearance = { hole, appearanceId: this.appearanceId };
+    const type = this.typeRandom() < 0.1 ? 'giant' : 'normal';
+    const appearance = {
+      hole,
+      appearanceId: this.appearanceId,
+      type,
+      status: 'active',
+      visibleMs: type === 'giant' ? 450 : progressionForHits(this.hits).visibleMs
+    };
     this.activeMoles.set(appearance.appearanceId, appearance);
     this.resolvedByHole.clear();
     return appearance;
@@ -139,7 +183,15 @@ export class MoleRound {
   expire(appearanceId) {
     if (!this.running) return false;
     const appearance = this.activeMoles.get(appearanceId);
-    if (!appearance) return false;
+    if (!appearance || appearance.status !== 'active') return false;
+    this.activeMoles.delete(appearanceId);
+    return true;
+  }
+
+
+  completeHit(appearanceId) {
+    const appearance = this.activeMoles.get(appearanceId);
+    if (!appearance || appearance.status !== 'hit') return false;
     this.activeMoles.delete(appearanceId);
     return true;
   }
@@ -149,19 +201,20 @@ export class MoleRound {
     if (!this.running || !Number.isInteger(holeIndex) || holeIndex < 0 || holeIndex >= this.holeCount) {
       return { type: 'ignored' };
     }
-    const appearance = Array.from(this.activeMoles.values()).find((mole) => mole.hole === holeIndex);
+    const appearance = Array.from(this.activeMoles.values())
+      .find((mole) => mole.hole === holeIndex && mole.status === 'active');
     if (!appearance && this.resolvedByHole.has(holeIndex)) return { type: 'ignored' };
     if (appearance) {
-      this.activeMoles.delete(appearance.appearanceId);
+      appearance.status = 'hit';
       this.resolvedByHole.set(holeIndex, appearance.appearanceId);
       this.hits += 1;
-      this.score += 100;
+      const points = appearance.type === 'giant' ? 300 : 100;
+      this.score += points;
       const progression = progressionForHits(this.hits);
       const levelChanged = progression.level !== this.level;
       this.level = progression.level;
       this.holeCount = progression.holeCount;
-      if (levelChanged) this.clearActiveMoles();
-      return { type: 'hit', appearanceId: appearance.appearanceId, levelChanged, progression };
+      return { type: 'hit', appearanceId: appearance.appearanceId, moleType: appearance.type, points, levelChanged, progression };
     }
     this.misses += 1;
     this.score = Math.max(0, this.score - 50);
