@@ -36,6 +36,7 @@ button { font: inherit; }
   padding: max(20px, env(safe-area-inset-top)) 0 max(20px, env(safe-area-inset-bottom));
   text-align: center;
 }
+.game-screen { position: relative; }
 
 .brand h1 { margin: 4px 0; font-size: clamp(2rem, 10vw, 3.2rem); line-height: 1; }
 .brand p { margin: 10px auto 18px; font-weight: 700; }
@@ -127,6 +128,9 @@ button { font: inherit; }
 .hole.giant-mole .mole::before { content: "★ • ᴥ • ★"; font-size: clamp(.65rem, 3.5vw, 1.2rem); }
 .hole.mole-hit .mole { bottom: -13%; background: #ef5b4c; filter: saturate(1.25) brightness(1.12); }
 .hole.mole-hit .mole::before { content: "× ᴥ ×"; }
+.hole.flower-appearance .mole { left: 3%; right: 3%; border: 0; background: transparent; }
+.hole.flower-appearance .mole::before { content: "🌼"; inset: 5% 0 auto; font-size: clamp(2rem, 12vw, 4.4rem); filter: drop-shadow(0 3px 0 #3f762d); }
+.hole.flower-wilted .mole::before { content: "🥀"; filter: grayscale(.65) drop-shadow(0 3px 0 #654124); }
 .hole.hit { animation: hit-pop 240ms ease-out; }
 .hole.wrong { animation: wrong-shake 240ms linear; }
 
@@ -138,7 +142,9 @@ button { font: inherit; }
 .hammer {
   top: 1%;
   left: 50%;
-  font-size: clamp(1.7rem, 9vw, 3rem);
+  width: clamp(48px, 15vw, 96px);
+  height: auto;
+  object-fit: contain;
   line-height: 1;
   transform: translate(-5%, -40%) rotate(-35deg);
   transform-origin: 20% 80%;
@@ -173,6 +179,27 @@ button { font: inherit; }
 }
 .countdown[hidden] { display: none; }
 
+.level-banner {
+  position: absolute;
+  z-index: 8;
+  top: 50%;
+  left: 50%;
+  width: max-content;
+  max-width: calc(100% - 24px);
+  padding: 14px 24px;
+  border: 4px solid #51391f;
+  border-radius: 999px;
+  color: #302413;
+  background: #fff36a;
+  box-shadow: 0 7px 0 #c28c1f, 0 14px 28px #30241355;
+  font-size: clamp(1.7rem, 10vw, 3rem);
+  font-weight: 1000;
+  transform: translate(-50%, -50%);
+  animation: level-banner 1.2s ease-out both;
+  pointer-events: none;
+}
+.level-banner[hidden] { display: none; }
+
 .result-screen { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 16px; background: #302413c9; }
 .result-screen[hidden] { display: none; }
 .pause-screen { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 16px; background: #171109f2; }
@@ -189,6 +216,11 @@ button { font: inherit; }
 
 @keyframes hit-pop { 50% { transform: scale(.9); filter: brightness(1.5); } }
 @keyframes wrong-shake { 25%, 75% { transform: translateX(-4px); } 50% { transform: translateX(4px); } }
+@keyframes level-banner {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(.55) rotate(-5deg); }
+  20%, 72% { opacity: 1; transform: translate(-50%, -50%) scale(1.06) rotate(0); }
+  100% { opacity: 0; transform: translate(-50%, -62%) scale(.96); }
+}
 @keyframes hammer-strike { 50%, 100% { transform: translate(-45%, 28%) rotate(8deg); } }
 @keyframes shockwave { from { opacity: 1; transform: scale(.25); } to { opacity: 0; transform: scale(1.7); } }
 @keyframes stars-pop { from { opacity: 0; transform: scale(.4); } 55% { opacity: 1; } to { opacity: 0; transform: scale(1.25) rotate(12deg); } }

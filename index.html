@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#ffd84d">
   <title>두더지 팡팡</title>
-  <link rel="stylesheet" href="styles.css?v=20260914-3">
+  <link rel="stylesheet" href="styles.css?v=20260914-5">
 </head>
 <body>
   <main class="game-shell">
@@ -21,11 +21,12 @@
     <section id="start-screen" class="panel start-screen" aria-labelledby="how-to-play">
       <h2 id="how-to-play">게임 방법</h2>
       <ul>
-        <li>단계별 판/두더지: 3×3/1 → 4×4/1 → 4×4/2 → 5×5/2 → 5×5/3</li>
-        <li>가끔 300점짜리 대왕 두더지가 짧게 나타나요!</li>
-        <li>두더지는 +100점, 빈 구멍은 -50점이에요.</li>
-        <li>놓친 두더지는 감점되지 않아요.</li>
-        <li>10마리를 잡을 때마다 판이 커지고 빨라져요.</li>
+        <li>단계: 3×3/1 → 4×4/1 → 4×4/2 → 5×5/2 → 5×5/3</li>
+        <li>일반 두더지 +100점</li>
+        <li>10% 확률의 짧은 대왕 두더지 +300점</li>
+        <li>꽃을 누르면 -100점, 빈 구멍은 -50점</li>
+        <li>놓친 두더지와 꽃은 감점되지 않아요.</li>
+        <li>두더지 10마리마다 다음 레벨!</li>
       </ul>
       <button id="start-button" class="primary-button" type="button">게임 시작</button>
     </section>
@@ -38,6 +39,7 @@
       </div>
       <p id="feedback" class="feedback" aria-live="polite">두더지를 기다리세요!</p>
       <div id="board" class="board" aria-label="3행 3열 두더지 구멍"></div>
+      <div id="level-banner" class="level-banner" hidden aria-live="assertive" aria-atomic="true"></div>
     </section>
 
     <div id="countdown" class="countdown" hidden aria-live="assertive" aria-atomic="true"></div>
@@ -63,6 +65,6 @@
       </div>
     </section>
   </main>
-  <script type="module" src="app.js?v=20260914-3"></script>
+  <script type="module" src="app.js?v=20260914-5"></script>
 </body>
 </html>

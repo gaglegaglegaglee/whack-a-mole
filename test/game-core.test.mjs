@@ -166,11 +166,82 @@ test('giant mole uses injected ten-percent roll, 450ms duration, and 300 points'
   assert.deepEqual({ moleType: result.moleType, points: result.points }, { moleType: 'giant', points: 300 });
   assert.equal(giantRound.score, 300);
 
-  const normalRound = new MoleRound({ random: () => 0.5, typeRandom: () => 0.1 });
+  const normalRound = new MoleRound({ random: () => 0.5, typeRandom: () => 0.25 });
   normalRound.start();
   const normal = normalRound.showNext();
   assert.equal(normal.type, 'normal');
   assert.equal(normal.visibleMs, 1100);
+});
+
+test('type probability boundaries are giant 10%, flower 15%, normal 75%', () => {
+  const typeAt = (roll) => {
+    const round = new MoleRound({ typeRandom: () => roll });
+    round.start();
+    return round.showNext().type;
+  };
+  assert.equal(typeAt(0), 'giant');
+  assert.equal(typeAt(0.099999), 'giant');
+  assert.equal(typeAt(0.1), 'flower');
+  assert.equal(typeAt(0.249999), 'flower');
+  assert.equal(typeAt(0.25), 'normal');
+  assert.equal(typeAt(0.999), 'normal');
+});
+
+test('flower costs 100 with a zero floor, never advances hits, and expires without penalty', () => {
+  const round = new MoleRound({ typeRandom: () => 0.15 });
+  round.start();
+  let flower = round.showNext();
+  let result = round.press(flower.hole);
+  assert.deepEqual({ type: result.type, points: result.points }, { type: 'flower', points: -100 });
+  assert.equal(round.score, 0);
+  assert.equal(round.hits, 0);
+  assert.equal(round.activeMoles.get(flower.appearanceId).status, 'wilted');
+  assert.equal(round.press(flower.hole).type, 'ignored');
+  round.completeHit(flower.appearanceId);
+
+  round.score = 250;
+  flower = round.showNext();
+  result = round.press(flower.hole);
+  assert.equal(round.score, 150);
+  assert.equal(round.hits, 0);
+  round.completeHit(flower.appearanceId);
+  flower = round.showNext();
+  assert.equal(round.expire(flower.appearanceId), true);
+  assert.equal(round.score, 150);
+  assert.equal(round.hits, 0);
+});
+
+test('new appearance does not clear flower or mole afterimage guards before cleanup', () => {
+  for (const firstRoll of [0.15, 0.5]) {
+    const rolls = [firstRoll, 0.5];
+    const round = new MoleRound({ random: () => 0, typeRandom: () => rolls.shift() ?? 0.5 });
+    round.start();
+    round.hits = 20;
+    round.level = 3;
+    round.holeCount = 16;
+    round.score = 500;
+    const reacted = round.showNext();
+    const reaction = round.press(reacted.hole);
+    const scoreAfterReaction = round.score;
+    const hitsAfterReaction = round.hits;
+    const other = round.showNext();
+    assert.ok(other);
+    assert.notEqual(other.hole, reacted.hole);
+    assert.equal(round.press(reacted.hole).type, 'ignored');
+    assert.equal(round.score, scoreAfterReaction);
+    assert.equal(round.hits, hitsAfterReaction);
+    assert.equal(round.completeHit(reaction.appearanceId), true);
+    assert.equal(round.press(reacted.hole).type, 'miss');
+    assert.equal(round.score, Math.max(0, scoreAfterReaction - 50));
+  }
+});
+
+test('natural expiry never installs an afterimage guard', () => {
+  const round = new MoleRound({ typeRandom: () => 0.15 });
+  round.start();
+  const flower = round.showNext();
+  assert.equal(round.expire(flower.appearanceId), true);
+  assert.equal(round.press(flower.hole).type, 'miss');
 });
 
 test('hit mole stays non-interactive until its visual lifecycle completes', () => {

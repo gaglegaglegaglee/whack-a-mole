@@ -21,6 +21,7 @@ const muteButton = document.querySelector('#mute-button');
 const systemNotice = document.querySelector('#system-notice');
 const pauseScreen = document.querySelector('#pause-screen');
 const resumeButton = document.querySelector('#resume-button');
+const levelBanner = document.querySelector('#level-banner');
 
 const round = new MoleRound({ typeRandom: Math.random });
 let holes = [];
@@ -34,6 +35,7 @@ let nextKind = null;
 let nextProgression = null;
 let pauseSnapshot = null;
 let countdownInterrupted = false;
+let levelBannerTimer = null;
 let audioContext = null;
 let storage = null;
 let storageNoticeShown = false;
@@ -124,6 +126,9 @@ function clearGameTasks() {
   nextDueAt = null;
   nextKind = null;
   nextProgression = null;
+  window.clearTimeout(levelBannerTimer);
+  levelBannerTimer = null;
+  levelBanner.hidden = true;
 }
 
 function paintMoles() {
@@ -133,9 +138,12 @@ function paintMoles() {
     const active = Boolean(mole);
     hole.classList.toggle('has-mole', active);
     hole.classList.toggle('giant-mole', mole?.type === 'giant');
+    hole.classList.toggle('flower-appearance', mole?.type === 'flower');
     hole.classList.toggle('mole-hit', mole?.status === 'hit');
+    hole.classList.toggle('flower-wilted', mole?.status === 'wilted');
     hole.setAttribute('aria-pressed', String(active));
     if (mole?.type === 'giant') hole.setAttribute('aria-label', `${hole.dataset.label}, 대왕 두더지`);
+    else if (mole?.type === 'flower') hole.setAttribute('aria-label', `${hole.dataset.label}, 꽃 장애물`);
     else hole.setAttribute('aria-label', hole.dataset.label);
   });
 }
@@ -245,9 +253,11 @@ function flash(hole, className) {
 }
 
 function showStrikeEffect(hole, type) {
-  const hammer = document.createElement('span');
+  const hammer = document.createElement('img');
   hammer.className = 'hammer';
-  hammer.textContent = '🔨';
+  hammer.src = 'assets/toy-mallet.png';
+  hammer.alt = '';
+  hammer.draggable = false;
   hammer.setAttribute('aria-hidden', 'true');
   hole.append(hammer);
   const effects = [hammer];
@@ -271,6 +281,12 @@ function changeLevel(progression) {
   holes.forEach((hole) => { hole.disabled = true; });
   feedback.className = 'feedback success';
   feedback.textContent = `${progression.level}단계! 판이 더 빠르고 커졌어요.`;
+  levelBanner.textContent = `레벨 ${progression.level}!`;
+  levelBanner.hidden = false;
+  levelBannerTimer = window.setTimeout(() => {
+    levelBanner.hidden = true;
+    levelBannerTimer = null;
+  }, 1200);
   updateClock(runId);
   scheduleLevelChange(progression, 280);
 }
@@ -300,6 +316,18 @@ board.addEventListener('click', (event) => {
     flash(hole, 'hit');
     if (result.levelChanged) changeLevel(result.progression);
     else scheduleHitRemoval(round.activeMoles.get(result.appearanceId));
+    return;
+  }
+  if (result.type === 'flower') {
+    const flowerTimer = moleTimers.get(result.appearanceId);
+    if (flowerTimer) window.clearTimeout(flowerTimer.timer);
+    moleTimers.delete(result.appearanceId);
+    paintMoles();
+    updateStatus();
+    feedback.className = 'feedback failure';
+    feedback.textContent = '앗, 꽃을 때렸어요! -100 ✿';
+    flash(hole, 'wrong');
+    scheduleHitRemoval(round.activeMoles.get(result.appearanceId));
     return;
   }
   updateStatus();

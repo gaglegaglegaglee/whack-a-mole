@@ -55,11 +55,47 @@ test('hammer and hit-only star and shockwave effects cannot block input', async 
     readFile(new URL('styles.css', root), 'utf8')
   ]);
   assert.match(source, /hammer\.className = 'hammer'/);
+  assert.match(source, /hammer\.src = 'assets\/toy-mallet\.png'/);
+  assert.match(source, /hammer\.alt = ''/);
   assert.match(source, /showStrikeEffect\(hole, feedbackType\)[\s\S]*if \(result\.type === 'ignored'\) return/);
   assert.match(source, /if \(type === 'hit'\)[\s\S]*shockwave\.className = 'shockwave'[\s\S]*stars\.className = 'stars'/);
   assert.match(css, /\.hammer, \.shockwave, \.stars\s*\{[\s\S]*pointer-events:\s*none/);
   assert.match(css, /animation:\s*hammer-strike 250ms/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.hammer/);
+});
+
+test('intro contains every current score, level, obstacle, and miss rule', async () => {
+  const html = await readFile(new URL('index.html', root), 'utf8');
+  assert.match(html, /3×3\/1 → 4×4\/1 → 4×4\/2 → 5×5\/2 → 5×5\/3/);
+  assert.match(html, /일반 두더지 \+100점/);
+  assert.match(html, /10%[^<]*대왕 두더지 \+300점/);
+  assert.match(html, /꽃을 누르면 -100점, 빈 구멍은 -50점/);
+  assert.match(html, /놓친 두더지와 꽃은 감점되지 않아요/);
+  assert.match(html, /두더지 10마리마다 다음 레벨/);
+  assert.match(html, /styles\.css\?v=20260914-5/);
+  assert.match(html, /app\.js\?v=20260914-5/);
+});
+
+test('flower has distinct active and wilted visuals and shares safe appearance lifecycle', async () => {
+  const [source, css] = await Promise.all([
+    readFile(new URL('app.js', root), 'utf8'),
+    readFile(new URL('styles.css', root), 'utf8')
+  ]);
+  assert.match(source, /classList\.toggle\('flower-appearance'/);
+  assert.match(source, /classList\.toggle\('flower-wilted'/);
+  assert.match(source, /꽃을 때렸어요! -100/);
+  assert.match(css, /\.hole\.flower-appearance \.mole/);
+  assert.match(css, /\.hole\.flower-wilted \.mole::before/);
+});
+
+test('generated mallet image is constrained for clear touch feedback and cannot intercept input', async () => {
+  const [css, mallet] = await Promise.all([
+    readFile(new URL('styles.css', root), 'utf8'),
+    readFile(new URL('assets/toy-mallet.png', root))
+  ]);
+  assert.match(css, /\.hammer\s*\{[\s\S]*width:\s*clamp\(48px, 15vw, 96px\)/);
+  assert.match(css, /\.hammer, \.shockwave, \.stars\s*\{[\s\S]*pointer-events:\s*none/);
+  assert.deepEqual(Array.from(mallet.subarray(0, 8)), [137, 80, 78, 71, 13, 10, 26, 10]);
 });
 
 test('optional vibration and Web Audio are guarded and mute is user controlled', async () => {
@@ -123,6 +159,18 @@ test('giant and hit lifecycle receive distinct mole classes without replacing tu
   assert.match(source, /scheduleHitRemoval\(round\.activeMoles\.get\(result\.appearanceId\)\)/);
   assert.match(css, /\.hole\.giant-mole \.mole/);
   assert.match(css, /\.hole\.mole-hit \.mole/);
+});
+
+test('level changes show a temporary assertive banner above the board', async () => {
+  const [html, source, css] = await Promise.all([
+    readFile(new URL('index.html', root), 'utf8'),
+    readFile(new URL('app.js', root), 'utf8'),
+    readFile(new URL('styles.css', root), 'utf8')
+  ]);
+  assert.match(html, /id="level-banner"[^>]+aria-live="assertive"/);
+  assert.match(source, /levelBanner\.textContent = `레벨 \$\{progression\.level\}!`/);
+  assert.match(source, /levelBannerTimer = window\.setTimeout\([\s\S]*1200\)/);
+  assert.match(css, /\.level-banner\s*\{[\s\S]*pointer-events:\s*none/);
 });
 
 test('new expiry deadlines are separated from every active expiry timer', async () => {

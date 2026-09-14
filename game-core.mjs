@@ -140,6 +140,7 @@ export class MoleRound {
 
   clearActiveMoles() {
     this.activeMoles.clear();
+    this.resolvedByHole.clear();
   }
 
   reset() {
@@ -167,7 +168,8 @@ export class MoleRound {
     if (hole === null) return null;
     this.previousHole = hole;
     this.appearanceId += 1;
-    const type = this.typeRandom() < 0.1 ? 'giant' : 'normal';
+    const typeRoll = this.typeRandom();
+    const type = typeRoll < 0.1 ? 'giant' : typeRoll < 0.25 ? 'flower' : 'normal';
     const appearance = {
       hole,
       appearanceId: this.appearanceId,
@@ -176,7 +178,6 @@ export class MoleRound {
       visibleMs: type === 'giant' ? 450 : progressionForHits(this.hits).visibleMs
     };
     this.activeMoles.set(appearance.appearanceId, appearance);
-    this.resolvedByHole.clear();
     return appearance;
   }
 
@@ -191,8 +192,11 @@ export class MoleRound {
 
   completeHit(appearanceId) {
     const appearance = this.activeMoles.get(appearanceId);
-    if (!appearance || appearance.status !== 'hit') return false;
+    if (!appearance || !['hit', 'wilted'].includes(appearance.status)) return false;
     this.activeMoles.delete(appearanceId);
+    if (this.resolvedByHole.get(appearance.hole) === appearanceId) {
+      this.resolvedByHole.delete(appearance.hole);
+    }
     return true;
   }
 
@@ -205,6 +209,12 @@ export class MoleRound {
       .find((mole) => mole.hole === holeIndex && mole.status === 'active');
     if (!appearance && this.resolvedByHole.has(holeIndex)) return { type: 'ignored' };
     if (appearance) {
+      if (appearance.type === 'flower') {
+        appearance.status = 'wilted';
+        this.resolvedByHole.set(holeIndex, appearance.appearanceId);
+        this.score = Math.max(0, this.score - 100);
+        return { type: 'flower', appearanceId: appearance.appearanceId, moleType: 'flower', points: -100, levelChanged: false, progression: progressionForHits(this.hits) };
+      }
       appearance.status = 'hit';
       this.resolvedByHole.set(holeIndex, appearance.appearanceId);
       this.hits += 1;
